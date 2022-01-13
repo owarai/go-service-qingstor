@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -241,19 +242,29 @@ func (s *Service) detectLocation(name string) (location string, err error) {
 		err = s.formatError("detect_location", err, "")
 	}()
 
-	url := fmt.Sprintf("%s://%s.%s:%d", s.config.Protocol, name, s.config.Host, s.config.Port)
+	u := fmt.Sprintf("%s://%s.%s:%d", s.config.Protocol, name, s.config.Host, s.config.Port)
 
-	r, err := s.client.Head(url)
+	r, err := s.client.Head(u)
 	if err != nil {
 		return
 	}
-	if r.StatusCode != http.StatusTemporaryRedirect {
-		err = fmt.Errorf("head status is %d instead of %d", r.StatusCode, http.StatusTemporaryRedirect)
+	// we don't care about status-code anymore, just check headers.
+	location = r.Header.Get("x-qs-bucket-region")
+	if location != "" {
 		return
 	}
 
+	// we HEAD use vhost-style url, so Location must also be vhost style:
 	// Example URL: https://bucket.zone.qingstor.com
-	location = strings.Split(r.Header.Get(headers.Location), ".")[1]
+	locationUrl, err := url.Parse(r.Header.Get(headers.Location))
+	if err != nil {
+		return
+	}
+	location = strings.Split(locationUrl.Host, ".")[1]
+	if location == "" {
+		err = fmt.Errorf("cannot detect location due to missing http header")
+		return
+	}
 	return
 }
 
