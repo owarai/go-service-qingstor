@@ -320,14 +320,28 @@ func (s *Service) detectLocation(name string) (location string, err error) {
 		err = s.formatError("detect_location", err, "")
 	}()
 
-	u := fmt.Sprintf("%s://%s:%d/%s", s.config.Protocol, s.config.Host, s.config.Port, name)
+	var (
+		u        *url.URL
+		hostPart = s.config.Host
+		path     = name
+	)
+	if s.config.EnableVirtualHostStyle {
+		hostPart = name + "." + hostPart
+		path = ""
+	}
+	u, err = url.Parse(fmt.Sprintf("%s://%s:%d", s.config.Protocol, hostPart, s.config.Port))
+	if err != nil {
+		return "", err
+	}
+	u.Path = path
 
-	r, err := s.client.Head(u)
+	r, err := s.client.Head(u.String())
 	if err != nil {
 		return
 	}
-	if r.StatusCode != http.StatusMovedPermanently {
-		err = fmt.Errorf("%w: head status is %d instead of %d", services.ErrUnexpected, r.StatusCode, http.StatusMovedPermanently)
+	// we don't care about status-code anymore, just check headers.
+	location = r.Header.Get("x-qs-bucket-region")
+	if location != "" {
 		return
 	}
 
@@ -337,6 +351,10 @@ func (s *Service) detectLocation(name string) (location string, err error) {
 		return
 	}
 	location = strings.Split(locationUrl.Host, ".")[0]
+	if location == "" {
+		err = fmt.Errorf("%w: cannot detect location due to missing http header", services.ErrUnexpected)
+		return
+	}
 	return
 }
 
